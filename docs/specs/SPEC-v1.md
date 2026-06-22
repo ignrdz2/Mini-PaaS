@@ -65,7 +65,8 @@ mini-paas/
 │   └── deploy/
 │       └── orchestration.go    # coordina Builder + docker run + healthcheck + ProxyManager
 ├── migrations/
-│   └── 0001_init.sql
+│   ├── 0001_init.up.sql
+│   └── 0001_init.down.sql
 └── docs/
     ├── ARCHITECTURE.md
     ├── specs/
