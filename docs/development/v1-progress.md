@@ -357,15 +357,174 @@ pueda completarse sin timeout; los demás usan port 1 (nadie escucha) con timeou
 
 ---
 
+---
+
+## Fase 6 — API REST ✅
+
+**Planificado:** servidor HTTP con 7 endpoints REST, router chi/v5, `cmd/orchestrator/main.go`
+que reemplaza el stub con el arranque real del sistema.
+
+**Implementado:**
+
+### Dependencia agregada
+- `github.com/go-chi/chi/v5 v5.3.0` — router HTTP con soporte de parámetros de URL y middleware.
+
+### `internal/api/server.go` — `Server`
+
+```go
+type Server struct {
+    store        store.Store
+    orchestrator *deploy.Orchestrator
+    docker       *docker.DockerClient
+    proxy        proxy.ProxyManager
+    router       *chi.Mux
+}
+
+func NewServer(s store.Store, o *deploy.Orchestrator, d *docker.DockerClient, p proxy.ProxyManager) *Server
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request)
+```
+
+`NewServer` inicializa el router y registra los 7 endpoints con `middleware.Logger` y
+`middleware.Recoverer`. `ServeHTTP` delega directamente al chi router.
+
+### `internal/api/handlers.go` — los 7 handlers
+
+Todos responden en JSON (`Content-Type: application/json`). Los errores siguen el formato
+`{"error": "mensaje"}` con el status HTTP apropiado.
+
+| Handler | Método + Path | Descripción |
+|---|---|---|
+| `crearApp` | `POST /apps` | Valida `name` y `repo_url` no vacíos; `health_path` default `/`. 409 en nombre duplicado (detecta código Postgres `23505`). Retorna 201. |
+| `listarApps` | `GET /apps` | Lista todas las apps. Retorna array vacío `[]` si no hay ninguna. |
+| `obtenerApp` | `GET /apps/{name}` | App + campo `active_deployment` (objeto o `null`). |
+| `eliminarApp` | `DELETE /apps/{name}` | Detiene el container activo, marca el deployment como `stopped`, elimina la app, sincroniza el proxy. Retorna 204. |
+| `crearDeployment` | `POST /apps/{name}/deployments` | Llama `Orchestrator.Deploy` con timeout de 10 minutos. Si el deploy termina en `failed`, retorna 200 con el deployment (el cliente lee `error_message`). Solo 500 si no se pudo iniciar el proceso. |
+| `listarDeployments` | `GET /apps/{name}/deployments` | Histórico completo de deployments de la app. |
+| `obtenerDeployment` | `GET /apps/{name}/deployments/{id}` | Deployment puntual por UUID. Valida el formato del ID con `pgtype.UUID.Scan`. |
+
+**Tipos de respuesta:**
+- `appResponse` — campos JSON limpios: UUID como string `xxxxxxxx-xxxx-...`, timestamps en RFC3339.
+- `deploymentResponse` — campos nullable (`container_id`, `internal_port`, `finished_at`,
+  `error_message`) serializados como punteros Go: `null` en JSON si no están presentes.
+- `appConDeployment` — embebe `appResponse` + campo `active_deployment *deploymentResponse`.
+
+**Helper `sincronizarProxy`** en el `Server`: reutiliza la misma lógica que el Orchestrator
+(listar apps, obtener deployment activo por cada una, construir `[]proxy.Route`) para
+sincronizar Traefik al eliminar una app.
+
+### `cmd/orchestrator/main.go` — arranque real
+
+Lee configuración de variables de entorno con defaults para desarrollo local:
+
+| Variable | Default |
+|---|---|
+| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/mini_paas?sslmode=disable` |
+| `TRAEFIK_CONFIG_PATH` | `/tmp/traefik-dynamic.yml` |
+| `LISTEN_ADDR` | `:8080` |
+
+Secuencia de arranque: `NewPostgresStore` → `NewDockerClient` → `NewTraefikFileProxyManager`
+→ `NewDockerfileBuilder` → `NewOrchestrator` → `NewServer` → `http.ListenAndServe`.
+
+### Ajuste respecto al plan
+- Se agregó `Client() *client.Client` a `DockerClient` para exponer el cliente subyacente
+  del SDK. Es necesario porque `NewDockerfileBuilder` recibe un `*client.Client` directamente
+  (no un `*DockerClient`), y el main necesita pasar el mismo cliente a ambos componentes.
+
+### Verificación
+
+```
+go build ./cmd/orchestrator  ✅
+go build ./...               ✅
+```
+
+Smoke test con Postgres real (`docker compose up -d postgres`):
+
+```
+GET  /apps        → 200  []
+POST /apps        → 201  {"id":"...","name":"test","repo_url":"https://github.com/x/y","health_path":"/","created_at":"..."}
+```
+
+---
+
+---
+
+## Fase 7 — CLI deployctl ✅
+
+**Planificado:** CLI `deployctl` con subcomandos cobra, output tabular con color, flag `--json`
+para scripting, tests invocando el binario compilado contra un `httptest.Server`.
+
+**Implementado:**
+
+### Dependencias agregadas
+- `github.com/spf13/cobra v1.10.2` — árbol de subcomandos
+- `github.com/fatih/color v1.19.0` — output con color ANSI
+- `github.com/olekukonko/tablewriter v0.0.5` — tablas formateadas
+
+> Se fijó `tablewriter` en v0.0.5 en lugar de la última (v1.1.4): la v1.x tiene una API
+> completamente incompatible (builder pattern) que rompería el código. La v0.0.5 tiene la
+> API clásica y estable.
+
+### Estructura de archivos (`cmd/deployctl/`)
+
+| Archivo | Responsabilidad |
+|---|---|
+| `main.go` | Punto de entrada; construye el árbol cobra y llama `Execute()` |
+| `client.go` | `apiClient`: HTTP client con `hacer()`, detección de `{"error":"..."}`, dos constructores (con/sin timeout) |
+| `output.go` | Tablas, detalle, colores por status, `imprimirError` (stderr + exit 1), `--json` |
+| `cmd_apps.go` | Subcomandos `apps create/list/get/delete/deploy` |
+| `cmd_deployments.go` | Subcomandos `deployments list/get` |
+| `deployctl_test.go` | 11 tests de integración vía `os/exec` |
+
+### Comandos implementados
+
+| Comando | Descripción |
+|---|---|
+| `apps create <name> --repo <url> [--health-path /]` | 201 → confirma con ID corto |
+| `apps list [--json]` | Tabla: Name, Repo URL, Created At |
+| `apps get <name> [--json]` | Detalle + `active_deployment` o mensaje vacío |
+| `apps delete <name>` | 204 → confirma eliminación |
+| `apps deploy <name>` | Sin timeout de cliente; spinner de espera; exit 1 si `status=failed` |
+| `deployments list <app-name> [--json]` | Tabla: ID (8 chars), Status, Image Tag, Created At |
+| `deployments get <app-name> <id> [--json]` | Detalle completo del deployment |
+
+**Comportamiento de `apps deploy`:**
+- Muestra mensaje de progreso mientras espera la respuesta HTTP síncrona (hasta 10 min).
+- Status `running` → mensaje de éxito, exit 0.
+- Status `failed` → `error_message` en stderr, exit 1.
+- App inexistente (404) → error en stderr, exit 1.
+
+**`--json` global en comandos de lectura:** serializa la respuesta del servidor como JSON
+indentado directamente en stdout. El output tabular usa colores ANSI desactivables con
+`NO_COLOR=1` (respetado automáticamente por `fatih/color`).
+
+**Base URL:** `DEPLOYCTL_API_URL` (default: `http://localhost:8080`).
+
+### Tests (`deployctl_test.go`) — 11 tests
+
+`TestMain` compila el binario una sola vez en un directorio temporal antes de ejecutar
+los tests. Cada test levanta su propio `httptest.Server` que simula una respuesta concreta.
+
+| Test | Qué verifica |
+|---|---|
+| `TestAppsCreate` | stdout contiene el nombre, exit 0 |
+| `TestAppsList` | ambas apps aparecen en la tabla |
+| `TestAppsListJSON` | output es JSON válido con `--json` |
+| `TestAppsGet` | stdout contiene el nombre de la app |
+| `TestAppsDelete` | stdout menciona el nombre, exit 0 |
+| `TestAppsDeployExitoso` | stdout contiene `running`, exit 0 |
+| `TestAppsDeployFallido` | stderr contiene `error_message`, exit 1 |
+| `TestAppsDeployAppNoExiste` | stderr contiene mensaje de error, exit 1 |
+| `TestDeploymentsList` | ID corto aparece en la tabla |
+| `TestDeploymentsGet` | UUID completo aparece en el detalle |
+| `TestErrorServidor` | error del servidor llega a stderr, exit 1 |
+
+**Resultado final:** `go build -o bin/deployctl ./cmd/deployctl` ✅ · `go build ./...` ✅ · **11/11 PASS**
+
+---
+
 ## Próximas fases
 
 | Fase | Descripción | Estado |
 |---|---|---|
-| Fase 3 | Runtime + Healthcheck (DockerClient wrapper, WaitHealthy) | ✅ |
-| Fase 4 | ProxyManager (TraefikFileProxyManager, YAML atómico) | ✅ |
-
-| Fase 5 | Orquestación (coordina Builder → runtime → healthcheck → proxy) | ✅ |
-| Fase 6 | API REST (7 endpoints, chi router, main.go) | Pendiente |
-| Fase 7 | CLI deployctl (cobra, output tabular, --json) | Pendiente |
 | Fase 8 | Integración end-to-end (docker compose up, test e2e) | Pendiente |
 | Fase 9 | Documentación pública (README, limpieza de docs/) | Pendiente |
