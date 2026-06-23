@@ -291,6 +291,72 @@ Todos los tests usan `t.TempDir()` como directorio base del configPath.
 
 ---
 
+---
+
+## Fase 5 — Orquestación ✅
+
+**Planificado:** `internal/deploy/orchestration.go` coordinando Store → clone → Builder →
+RunContainer → WaitHealthy → ProxyManager, con transiciones de estado correctas y manejo
+de errores en cada paso.
+
+**Implementado:**
+
+### `internal/deploy/orchestration.go` — `Orchestrator`
+
+**Interfaces y constructores:**
+- `dockerRunner`: interfaz interna mínima (`RunContainer` + `StopAndRemoveContainer`)
+  que permite sustituir `*docker.DockerClient` por un stub en tests unitarios.
+- `NewOrchestrator(s, b, d, p, ...Option)`: constructor público, acepta `*docker.DockerClient`.
+- `NewOrchestratorWithRunner(s, b, d, p, ...Option)`: constructor de test, acepta `dockerRunner`.
+- `WithHealthTimeout(d)`: `Option` funcional para sobreescribir el timeout de 30s.
+- `ErrAppNotFound`: error centinela exportado para que los handlers de la API puedan
+  mapear el caso "app no existe" a un 404.
+
+**`Deploy(ctx, appName)` — secuencia completa:**
+
+| Paso | Estado | Acción |
+|---|---|---|
+| 1 | — | `GetApp` → `ErrAppNotFound` si no existe |
+| 2 | `pending` | `CreateDeployment` |
+| 3 | `pending` | `git clone --depth 1` a `os.MkdirTemp`; `defer os.RemoveAll` |
+| 4 | `building` | `Builder.Build` |
+| 5 | `building` | `RunContainer` → containerID, port |
+| 6 | `healthcheck` | `UpdateDeploymentStatus` con containerID + port; luego `WaitHealthy` |
+| 7 | `running` | `UpdateDeploymentStatus` con `finished_at=now()` |
+| 8 | — | Buscar deployment `running` anterior → `StopAndRemoveContainer` + marcar `stopped` |
+| 9 | — | `ListApps` + `GetActiveDeployment` por cada app → `ProxyManager.Sync` (fallo no fatal) |
+| 10 | — | Retornar deployment con status `running` |
+
+En cada paso de fallo: se llama `fallarDeployment` que marca el deployment como `failed`
+con `error_message` + `finished_at` antes de retornar el error.
+
+### Tests unitarios (`internal/deploy/orchestration_test.go`) — 5 tests
+
+Todos usan stubs en memoria (sin Docker real, sin Postgres, sin Traefik):
+
+| Test | Qué verifica |
+|---|---|
+| TestDeploy_HappyPath_SecuenciaDeEstados | status `running`, containerID y port correctos, proxy recibe routes |
+| TestDeploy_AppNoExiste | retorna `ErrAppNotFound` |
+| TestDeploy_FalloBuild_EstadoFailed | status `failed`, `ErrorMessage` poblado |
+| TestDeploy_FalloHealthcheck_ContainerDetenido | status `failed`, container detenido vía stub |
+| TestDeploy_FalloProxy_NoAfectaResultado | status `running` aunque `proxy.Sync` falle |
+
+Los tests de happy path y proxy caído levantan un `httptest.Server` real para que `WaitHealthy`
+pueda completarse sin timeout; los demás usan port 1 (nadie escucha) con timeout de 500ms.
+
+**Resultado final:** 9/9 PASS en `./internal/deploy/...` (4 healthcheck + 5 orchestration),
+`go build ./...` limpio.
+
+### Ajustes respecto al plan
+- Se introdujo la interfaz interna `dockerRunner` para desacoplar el Orchestrator del tipo
+  concreto `*docker.DockerClient` en tests — sin esto los tests unitarios habrían requerido
+  Docker daemon real, contradiciendo el objetivo de ser unitarios.
+- `NewOrchestratorWithRunner` y `WithHealthTimeout` se agregaron como superficie de test
+  explícita; `NewOrchestrator` mantiene la firma pública original.
+
+---
+
 ## Próximas fases
 
 | Fase | Descripción | Estado |
@@ -298,7 +364,7 @@ Todos los tests usan `t.TempDir()` como directorio base del configPath.
 | Fase 3 | Runtime + Healthcheck (DockerClient wrapper, WaitHealthy) | ✅ |
 | Fase 4 | ProxyManager (TraefikFileProxyManager, YAML atómico) | ✅ |
 
-| Fase 5 | Orquestación (coordina Builder → runtime → healthcheck → proxy) | Pendiente |
+| Fase 5 | Orquestación (coordina Builder → runtime → healthcheck → proxy) | ✅ |
 | Fase 6 | API REST (7 endpoints, chi router, main.go) | Pendiente |
 | Fase 7 | CLI deployctl (cobra, output tabular, --json) | Pendiente |
 | Fase 8 | Integración end-to-end (docker compose up, test e2e) | Pendiente |
