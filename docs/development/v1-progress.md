@@ -156,12 +156,89 @@ Flujo de `Build`:
 
 ---
 
+---
+
+## Fase 3 — Runtime + Healthcheck ✅
+
+**Planificado:** wrapper sobre el SDK de Docker para correr/detener containers y asignar
+puerto libre; lógica de healthcheck con polling HTTP y timeout.
+
+**Implementado:**
+
+### `internal/docker/client.go` — `DockerClient`
+
+Constructor `NewDockerClient()` usa `client.FromEnv` + `WithAPIVersionNegotiation` para
+respetar `DOCKER_HOST` y negociar versión de API automáticamente.
+
+**`RunContainer(ctx, imageTag, appName)`**
+- Llama a `FindFreePort()` para obtener un puerto libre del OS.
+- Crea el container con `ContainerCreate` usando `NetworkMode: "host"` e inyectando
+  `PORT=<n>` como variable de entorno.
+- Arranca con `ContainerStart`. Retorna `(containerID, port, error)`.
+- Etiqueta el container con `mini-paas.app=<appName>` para identificación futura.
+
+> Convención documentada en código: el orquestador elige el puerto y lo pasa al container
+> como `PORT`. La app deployada es responsable de leer `PORT` y escuchar en ese puerto.
+> No se hace port binding explícito en Docker — el proxy y el healthcheck acceden al
+> container directamente vía red host.
+
+**`StopAndRemoveContainer(ctx, containerID)`**
+- `ContainerStop` + `ContainerRemove(Force: true)`. Tolera `IsErrNotFound` en ambas
+  operaciones — no es error si el container ya fue removido.
+
+**`FindFreePort()`**
+- `net.Listen("tcp", "localhost:0")` → lee `ln.Addr().(*net.TCPAddr).Port` → cierra.
+
+### `internal/deploy/healthcheck.go` — `WaitHealthy`
+
+```go
+func WaitHealthy(ctx context.Context, port int, healthPath string, timeout time.Duration) error
+```
+
+- Crea un `context.WithTimeout` interno sobre el contexto recibido.
+- Ticker a 500ms. En cada tick: `http.NewRequestWithContext` + `httpClient.Do` (timeout
+  de 2s por request).
+- Considera healthy cualquier `resp.StatusCode < 500`. Errores de red → reintento silencioso.
+- Si el contexto se cancela o el timeout se agota: retorna error descriptivo con la URL
+  y la duración configurada.
+
+### Tests
+
+**`internal/docker/client_test.go`** (3 tests, requieren Docker daemon):
+
+| Test | Qué verifica |
+|---|---|
+| TestFindFreePort | retorna puerto > 0 sin error |
+| TestRunContainer_y_StopAndRemove | container arranca, se detiene y remueve; segunda llamada tolerante |
+| TestRunContainer_ImagenInexistente | error con imagen que no existe en el daemon |
+
+**`internal/deploy/healthcheck_test.go`** (4 tests, sin Docker):
+
+| Test | Qué verifica |
+|---|---|
+| TestWaitHealthy_ServidorSano | httptest.Server con 200 → WaitHealthy retorna nil |
+| TestWaitHealthy_HealthPath | path `/health` con 404 (< 500) → también healthy |
+| TestWaitHealthy_Timeout | puerto cerrado + timeout de 1s → error en ≤2s |
+| TestWaitHealthy_ContextCancelado | contexto cancelado previo → error inmediato |
+
+**Resultado final:** 7/7 PASS (4 deploy + 3 docker), `go build ./...` limpio.
+
+### Ajustes respecto al plan
+- `alpine:3.20` en `TestRunContainer_y_StopAndRemove`: alpine no tiene proceso por
+  defecto que ocupe el puerto, pero basta para verificar que el container arranca y se
+  puede remover. El puerto es irrelevante para este test (el healthcheck se testea aparte).
+- Se agregó `TestRunContainer_ImagenInexistente` (no estaba en el plan) para cubrir el
+  caso de fallo de `ContainerCreate` con imagen ausente.
+
+---
+
 ## Próximas fases
 
 | Fase | Descripción | Estado |
 |---|---|---|
-| Fase 3 | Runtime + Healthcheck (DockerClient wrapper, WaitHealthy) | Pendiente |
+| Fase 3 | Runtime + Healthcheck (DockerClient wrapper, WaitHealthy) | ✅ |
 | Fase 4 | ProxyManager (TraefikFileProxyManager, YAML atómico) | Pendiente |
+
 | Fase 5 | Orquestación (coordina Builder → runtime → healthcheck → proxy) | Pendiente |
 | Fase 6 | API REST (7 endpoints, chi router, main.go) | Pendiente |
 | Fase 7 | CLI deployctl (cobra, output tabular, --json) | Pendiente |
