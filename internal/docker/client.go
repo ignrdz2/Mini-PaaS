@@ -28,6 +28,12 @@ func (d *DockerClient) Close() error {
 	return d.cli.Close()
 }
 
+// Client retorna el cliente subyacente del SDK de Docker.
+// Se usa para inicializar componentes que reciben un *client.Client directamente (ej. DockerfileBuilder).
+func (d *DockerClient) Client() *client.Client {
+	return d.cli
+}
+
 // RunContainer crea y arranca un container a partir de imageTag.
 // Convención de puerto: el orquestador elige un puerto libre en el host y lo inyecta al
 // container como variable de entorno PORT. La app deployada es responsable de leer PORT

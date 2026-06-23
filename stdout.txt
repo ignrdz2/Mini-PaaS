@@ -1,0 +1,2 @@
+2026/06/23 10:18:46 "GET http://localhost:8080/apps HTTP/1.1" from [::1]:57739 - 200 3B in 20.9008ms
+2026/06/23 10:18:46 "POST http://localhost:8080/apps HTTP/1.1" from [::1]:57740 - 201 150B in 9.4875ms
