@@ -7,11 +7,12 @@ import (
 	"time"
 )
 
-// WaitHealthy hace polling al endpoint http://localhost:<port><healthPath> hasta que responde
+// WaitHealthy hace polling al endpoint http://<host>:<port><healthPath> hasta que responde
 // con status < 500, o hasta que se agota el timeout o se cancela el contexto.
-// Considera healthy cualquier respuesta con código HTTP menor a 500.
-func WaitHealthy(ctx context.Context, port int, healthPath string, timeout time.Duration) error {
-	url := fmt.Sprintf("http://localhost:%d%s", port, healthPath)
+// El parámetro host permite usar "localhost" (proceso local) o "host.docker.internal"
+// (cuando el orquestador corre dentro de Docker Desktop en Windows/Mac).
+func WaitHealthy(ctx context.Context, host string, port int, healthPath string, timeout time.Duration) error {
+	url := fmt.Sprintf("http://%s:%d%s", host, port, healthPath)
 
 	// cliente con timeout corto por request para no quedar bloqueado en un intento individual
 	httpClient := &http.Client{Timeout: 2 * time.Second}

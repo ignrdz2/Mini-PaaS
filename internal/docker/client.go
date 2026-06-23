@@ -7,6 +7,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	"github.com/docker/go-connections/nat"
 )
 
 // DockerClient envuelve el SDK oficial de Docker para las operaciones de runtime del orquestador.
@@ -45,15 +46,21 @@ func (d *DockerClient) RunContainer(ctx context.Context, imageTag, appName strin
 		return "", 0, fmt.Errorf("no se encontró puerto libre: %w", err)
 	}
 
+	// mapear el puerto del container al mismo puerto del host para que el orquestador
+	// pueda alcanzar la app vía host.docker.internal:<port> desde dentro de Docker
+	natPort := nat.Port(fmt.Sprintf("%d/tcp", port))
 	cfg := &container.Config{
-		Image: imageTag,
-		Env:   []string{fmt.Sprintf("PORT=%d", port)},
+		Image:        imageTag,
+		Env:          []string{fmt.Sprintf("PORT=%d", port)},
+		ExposedPorts: nat.PortSet{natPort: struct{}{}},
 		Labels: map[string]string{
 			"mini-paas.app": appName,
 		},
 	}
 	hostCfg := &container.HostConfig{
-		NetworkMode: "host",
+		PortBindings: nat.PortMap{
+			natPort: []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: fmt.Sprintf("%d", port)}},
+		},
 	}
 
 	resp, err := d.cli.ContainerCreate(ctx, cfg, hostCfg, nil, nil, "")

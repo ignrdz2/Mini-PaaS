@@ -19,6 +19,12 @@ func main() {
 	databaseURL := getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/mini_paas?sslmode=disable")
 	traefikConfigPath := getEnv("TRAEFIK_CONFIG_PATH", "/tmp/traefik-dynamic.yml")
 	listenAddr := getEnv("LISTEN_ADDR", ":8080")
+	// HEALTH_HOST controla el host usado en el healthcheck de cada deploy.
+	// Usar "host.docker.internal" cuando el orquestador corre dentro de Docker Desktop (Windows/Mac).
+	healthHost := getEnv("HEALTH_HOST", "localhost")
+	// PROXY_TARGET_HOST controla el host que Traefik usa para rutear tráfico a las apps.
+	// Usar "host.docker.internal" en Docker Desktop (Windows/Mac).
+	proxyTargetHost := getEnv("PROXY_TARGET_HOST", "localhost")
 
 	ctx := context.Background()
 
@@ -42,13 +48,13 @@ func main() {
 	}
 
 	// inicializar el proxy manager
-	proxyManager := proxy.NewTraefikFileProxyManager(traefikConfigPath)
+	proxyManager := proxy.NewTraefikFileProxyManager(traefikConfigPath, proxyTargetHost)
 
 	// inicializar el builder
 	b := builder.NewDockerfileBuilder(dockerClient.Client())
 
 	// inicializar el orquestador
-	orch := deploy.NewOrchestrator(s, b, dockerClient, proxyManager)
+	orch := deploy.NewOrchestrator(s, b, dockerClient, proxyManager, deploy.WithHealthHost(healthHost))
 
 	// crear y arrancar el servidor HTTP
 	srv := api.NewServer(s, orch, dockerClient, proxyManager)

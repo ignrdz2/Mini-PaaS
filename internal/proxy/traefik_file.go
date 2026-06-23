@@ -13,15 +13,17 @@ import (
 // de Traefik como archivo YAML (file provider). La escritura es atómica vía os.Rename.
 type TraefikFileProxyManager struct {
 	configPath string // path al archivo YAML dinámico de Traefik
+	targetHost string // host que Traefik usa para alcanzar los containers deployados
 }
 
 // garantía en tiempo de compilación de que TraefikFileProxyManager satisface ProxyManager.
 var _ ProxyManager = (*TraefikFileProxyManager)(nil)
 
 // NewTraefikFileProxyManager crea un manager apuntando a configPath.
-// configPath debe ser el path completo al archivo YAML, ej. "traefik/dynamic/dynamic.yml".
-func NewTraefikFileProxyManager(configPath string) *TraefikFileProxyManager {
-	return &TraefikFileProxyManager{configPath: configPath}
+// targetHost es el host que Traefik usará para rutear tráfico a las apps (normalmente
+// "localhost" en desarrollo directo, o "host.docker.internal" en Docker Desktop).
+func NewTraefikFileProxyManager(configPath, targetHost string) *TraefikFileProxyManager {
+	return &TraefikFileProxyManager{configPath: configPath, targetHost: targetHost}
 }
 
 // --- estructuras internas para serialización YAML ---
@@ -90,7 +92,7 @@ func (t *TraefikFileProxyManager) Sync(_ context.Context, routes []Route) error 
 			http.Services[r.AppName] = &traefikService{
 				LoadBalancer: &traefikLoadBalancer{
 					Servers: []traefikServer{
-						{URL: fmt.Sprintf("http://localhost:%d", r.TargetPort)},
+						{URL: fmt.Sprintf("http://%s:%d", t.targetHost, r.TargetPort)},
 					},
 				},
 			}

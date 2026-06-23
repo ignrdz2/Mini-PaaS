@@ -22,7 +22,7 @@ func TestWaitHealthy_ServidorSano(t *testing.T) {
 	// extraer el puerto del servidor de prueba
 	port := puertoDeURL(t, srv.URL)
 
-	err := deploy.WaitHealthy(context.Background(), port, "/", 5*time.Second)
+	err := deploy.WaitHealthy(context.Background(), "localhost", port, "/", 5*time.Second)
 	if err != nil {
 		t.Fatalf("WaitHealthy debería pasar con servidor sano, got: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestWaitHealthy_HealthPath(t *testing.T) {
 	port := puertoDeURL(t, srv.URL)
 
 	// 404 es < 500, así que también es healthy
-	err := deploy.WaitHealthy(context.Background(), port, "/health", 5*time.Second)
+	err := deploy.WaitHealthy(context.Background(), "localhost", port, "/health", 5*time.Second)
 	if err != nil {
 		t.Fatalf("WaitHealthy con /health: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestWaitHealthy_Timeout(t *testing.T) {
 	port := puertoCerrado(t)
 
 	inicio := time.Now()
-	err := deploy.WaitHealthy(context.Background(), port, "/", 1*time.Second)
+	err := deploy.WaitHealthy(context.Background(), "localhost", port, "/", 1*time.Second)
 	elapsed := time.Since(inicio)
 
 	if err == nil {
@@ -72,7 +72,7 @@ func TestWaitHealthy_ContextCancelado(t *testing.T) {
 	// cancelar inmediatamente
 	cancel()
 
-	err := deploy.WaitHealthy(ctx, port, "/", 30*time.Second)
+	err := deploy.WaitHealthy(ctx, "localhost", port, "/", 30*time.Second)
 	if err == nil {
 		t.Fatal("se esperaba error con contexto cancelado, got nil")
 	}

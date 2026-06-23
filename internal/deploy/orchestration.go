@@ -34,6 +34,7 @@ type Orchestrator struct {
 	docker        dockerRunner
 	proxy         proxy.ProxyManager
 	healthTimeout time.Duration
+	healthHost    string
 }
 
 // Option permite configurar opciones opcionales del Orchestrator.
@@ -44,15 +45,26 @@ func WithHealthTimeout(d time.Duration) Option {
 	return func(o *Orchestrator) { o.healthTimeout = d }
 }
 
-// NewOrchestrator crea un Orchestrator con un timeout de healthcheck de 30s por defecto.
-func NewOrchestrator(s store.Store, b builder.Builder, d *docker.DockerClient, p proxy.ProxyManager, opts ...Option) *Orchestrator {
-	o := &Orchestrator{
+// WithHealthHost sobreescribe el host que se usa para el healthcheck.
+// Usar "host.docker.internal" cuando el orquestador corre dentro de Docker Desktop (Windows/Mac).
+func WithHealthHost(host string) Option {
+	return func(o *Orchestrator) { o.healthHost = host }
+}
+
+func orquestadorBase(s store.Store, b builder.Builder, d dockerRunner, p proxy.ProxyManager) *Orchestrator {
+	return &Orchestrator{
 		store:         s,
 		builder:       b,
 		docker:        d,
 		proxy:         p,
 		healthTimeout: 30 * time.Second,
+		healthHost:    "localhost",
 	}
+}
+
+// NewOrchestrator crea un Orchestrator con un timeout de healthcheck de 30s por defecto.
+func NewOrchestrator(s store.Store, b builder.Builder, d *docker.DockerClient, p proxy.ProxyManager, opts ...Option) *Orchestrator {
+	o := orquestadorBase(s, b, d, p)
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -62,13 +74,7 @@ func NewOrchestrator(s store.Store, b builder.Builder, d *docker.DockerClient, p
 // NewOrchestratorWithRunner es el constructor de test que acepta la interfaz dockerRunner
 // en lugar del *docker.DockerClient concreto. Solo debe usarse en tests.
 func NewOrchestratorWithRunner(s store.Store, b builder.Builder, d dockerRunner, p proxy.ProxyManager, opts ...Option) *Orchestrator {
-	o := &Orchestrator{
-		store:         s,
-		builder:       b,
-		docker:        d,
-		proxy:         p,
-		healthTimeout: 30 * time.Second,
-	}
+	o := orquestadorBase(s, b, d, p)
 	for _, opt := range opts {
 		opt(o)
 	}
@@ -135,7 +141,7 @@ func (o *Orchestrator) Deploy(ctx context.Context, appName string) (store.Deploy
 		return store.Deployment{}, err
 	}
 
-	if err := WaitHealthy(ctx, port, app.HealthPath, o.healthTimeout); err != nil {
+	if err := WaitHealthy(ctx, o.healthHost, port, app.HealthPath, o.healthTimeout); err != nil {
 		o.docker.StopAndRemoveContainer(context.Background(), containerID) //nolint
 		return o.fallarDeployment(ctx, dep, fmt.Sprintf("healthcheck falló: %v", err))
 	}

@@ -16,7 +16,7 @@ func nuevoManager(t *testing.T) (*proxy.TraefikFileProxyManager, string) {
 	t.Helper()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "dynamic.yml")
-	return proxy.NewTraefikFileProxyManager(configPath), configPath
+	return proxy.NewTraefikFileProxyManager(configPath, "localhost"), configPath
 }
 
 // leerYAML parsea el archivo generado en un map genérico para inspección.
@@ -159,7 +159,7 @@ func TestSync_VariasRoutes(t *testing.T) {
 
 func TestSync_DirectorioInexistente(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), "no-existe", "dynamic.yml")
-	mgr := proxy.NewTraefikFileProxyManager(configPath)
+	mgr := proxy.NewTraefikFileProxyManager(configPath, "localhost")
 
 	err := mgr.Sync(context.Background(), []proxy.Route{{AppName: "x", TargetPort: 1234}})
 	if err == nil {

@@ -30,6 +30,7 @@ deployctl apps delete mi-app
 ## Quick start
 
 **Requisitos:**
+
 - Go 1.25+
 - Docker Desktop (con el daemon corriendo)
 - Git
@@ -54,6 +55,7 @@ Traefik escucha en `:80`.
 
 ```bash
 go build -o bin/deployctl ./cmd/deployctl
+
 ```
 
 Opcionalmente, mover `bin/deployctl` a algún directorio en el `PATH`.
@@ -61,6 +63,7 @@ Opcionalmente, mover `bin/deployctl` a algún directorio en el `PATH`.
 **4. Hacer el primer deploy:**
 
 El repositorio a deployar debe cumplir dos condiciones:
+
 - Tener un `Dockerfile` en la raíz.
 - La app debe leer la variable de entorno `PORT` y escuchar en ese puerto.
 
@@ -102,8 +105,6 @@ ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Limitaciones conocidas de v1
 
-Documentadas a propósito — mostrar qué le falta para ser "producción real" es parte del proyecto:
-
 - **Sin alta disponibilidad**: un solo servidor; si el orquestador cae no hay failover.
 - **Sin TLS**: HTTP plano. Traefik soporta Let's Encrypt nativamente (candidato para v2/v3).
 - **Downtime en cada deploy**: el container viejo se detiene antes de levantar el nuevo. Se resuelve en v2.
@@ -116,11 +117,13 @@ Documentadas a propósito — mostrar qué le falta para ser "producción real" 
 ## Roadmap
 
 ### v2 — Zero-downtime y mejor DX
+
 - Builds asíncronos con streaming de logs (`deployctl apps deploy --follow`).
 - Deploy zero-downtime: nuevo container up + healthcheck → switch atómico de tráfico → kill del viejo.
 - Rollback a un deployment anterior usando el histórico ya persistido desde v1.
 
 ### v3 — Multi-tenancy y producción real
+
 - Límites de CPU/memoria por container.
 - Logs persistentes y buscables.
 - Webhooks de GitHub para auto-deploy en push.

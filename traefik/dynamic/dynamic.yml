@@ -1,0 +1,17 @@
+http:
+    routers:
+        sample-app1:
+            rule: PathPrefix(`/sample-app1`)
+            service: sample-app1
+            middlewares:
+                - sample-app1-stripprefix
+    middlewares:
+        sample-app1-stripprefix:
+            stripPrefix:
+                prefixes:
+                    - /sample-app1
+    services:
+        sample-app1:
+            loadBalancer:
+                servers:
+                    - url: http://host.docker.internal:37833

@@ -172,15 +172,16 @@ respetar `DOCKER_HOST` y negociar versión de API automáticamente.
 
 **`RunContainer(ctx, imageTag, appName)`**
 - Llama a `FindFreePort()` para obtener un puerto libre del OS.
-- Crea el container con `ContainerCreate` usando `NetworkMode: "host"` e inyectando
-  `PORT=<n>` como variable de entorno.
+- Crea el container con `ContainerCreate` usando **port binding explícito** (`-p PORT:PORT`)
+  e inyectando `PORT=<n>` como variable de entorno. Usa `nat.PortMap` del SDK.
 - Arranca con `ContainerStart`. Retorna `(containerID, port, error)`.
 - Etiqueta el container con `mini-paas.app=<appName>` para identificación futura.
 
-> Convención documentada en código: el orquestador elige el puerto y lo pasa al container
-> como `PORT`. La app deployada es responsable de leer `PORT` y escuchar en ese puerto.
-> No se hace port binding explícito en Docker — el proxy y el healthcheck acceden al
-> container directamente vía red host.
+> Convención de puerto: el orquestador elige un puerto libre y lo inyecta al container como
+> `PORT`. La app deployada es responsable de leer `PORT` y escuchar en ese puerto. El port
+> binding explícito expone ese puerto en el host, lo que permite que el healthcheck y el
+> proxy alcancen la app tanto desde un proceso local como desde dentro de Docker Desktop
+> (Windows/Mac) vía `host.docker.internal:<port>`.
 
 **`StopAndRemoveContainer(ctx, containerID)`**
 - `ContainerStop` + `ContainerRemove(Force: true)`. Tolera `IsErrNotFound` en ambas
@@ -192,7 +193,7 @@ respetar `DOCKER_HOST` y negociar versión de API automáticamente.
 ### `internal/deploy/healthcheck.go` — `WaitHealthy`
 
 ```go
-func WaitHealthy(ctx context.Context, port int, healthPath string, timeout time.Duration) error
+func WaitHealthy(ctx context.Context, host string, port int, healthPath string, timeout time.Duration) error
 ```
 
 - Crea un `context.WithTimeout` interno sobre el contexto recibido.
@@ -258,15 +259,16 @@ Firma idéntica a la definida en ARCHITECTURE.md.
 
 ### `internal/proxy/traefik_file.go` — `TraefikFileProxyManager`
 
-Constructor `NewTraefikFileProxyManager(configPath string)` recibe el path completo al
-archivo YAML dinámico (valor de `TRAEFIK_CONFIG_PATH`).
+Constructor `NewTraefikFileProxyManager(configPath, targetHost string)` recibe el path
+completo al archivo YAML dinámico y el host que Traefik usará para alcanzar los containers.
+`targetHost` es `"localhost"` en desarrollo local y `"host.docker.internal"` en Docker Desktop.
 
 **`Sync(ctx, routes)`:**
 - Routes vacías → escribe YAML vacío válido (`{}` serializado).
 - Por cada route genera las tres entradas requeridas por Traefik file provider:
   - Router: `rule: "PathPrefix(\`/<appName>\`)"`, service, middlewares
   - Middleware: `stripPrefix` con `prefixes: ["/<appName>"]`
-  - Service: `loadBalancer.servers[0].url = "http://localhost:<targetPort>"`
+  - Service: `loadBalancer.servers[0].url = "http://<targetHost>:<targetPort>"`
 - Serializa el config completo de una vez (no incremental) con `yaml.Marshal`.
 - Escritura atómica en `escribirAtomico`: `os.CreateTemp` en el mismo directorio → write
   → close → `os.Rename`. Si falla en cualquier punto limpia el temporal.
@@ -287,7 +289,10 @@ Todos los tests usan `t.TempDir()` como directorio base del configPath.
 **Resultado final:** 6/6 PASS, `go build ./...` limpio.
 
 ### Ajustes respecto al plan
-- Ninguno. La implementación sigue el plan exactamente.
+- Se agregó `targetHost string` al constructor para resolver la incompatibilidad con Docker
+  Desktop (Windows/Mac): Traefik corre en su propio container y no puede usar `localhost`
+  para alcanzar las apps — necesita `host.docker.internal`. El default `"localhost"` preserva
+  el comportamiento en desarrollo local sin configuración adicional.
 
 ---
 
@@ -309,6 +314,7 @@ de errores en cada paso.
 - `NewOrchestrator(s, b, d, p, ...Option)`: constructor público, acepta `*docker.DockerClient`.
 - `NewOrchestratorWithRunner(s, b, d, p, ...Option)`: constructor de test, acepta `dockerRunner`.
 - `WithHealthTimeout(d)`: `Option` funcional para sobreescribir el timeout de 30s.
+- `WithHealthHost(host)`: `Option` para sobreescribir el host del healthcheck (default `"localhost"`). Necesario cuando el orquestador corre dentro de Docker Desktop — en ese caso se pasa `"host.docker.internal"`.
 - `ErrAppNotFound`: error centinela exportado para que los handlers de la API puedan
   mapear el caso "app no existe" a un 404.
 
@@ -354,6 +360,10 @@ pueda completarse sin timeout; los demás usan port 1 (nadie escucha) con timeou
   Docker daemon real, contradiciendo el objetivo de ser unitarios.
 - `NewOrchestratorWithRunner` y `WithHealthTimeout` se agregaron como superficie de test
   explícita; `NewOrchestrator` mantiene la firma pública original.
+- `WithHealthHost` se agregó para resolver la incompatibilidad de `NetworkMode: "host"` en
+  Docker Desktop (Windows/Mac): el orquestador dentro de Docker no puede usar `localhost`
+  para alcanzar containers con port binding — usa `host.docker.internal` en su lugar.
+  En desarrollo local sin Docker el default `"localhost"` funciona sin configuración adicional.
 
 ---
 
@@ -416,11 +426,13 @@ sincronizar Traefik al eliminar una app.
 
 Lee configuración de variables de entorno con defaults para desarrollo local:
 
-| Variable | Default |
-|---|---|
-| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/mini_paas?sslmode=disable` |
-| `TRAEFIK_CONFIG_PATH` | `/tmp/traefik-dynamic.yml` |
-| `LISTEN_ADDR` | `:8080` |
+| Variable | Default | Descripción |
+|---|---|---|
+| `DATABASE_URL` | `postgres://postgres:postgres@localhost:5432/mini_paas?sslmode=disable` | Cadena de conexión a Postgres |
+| `TRAEFIK_CONFIG_PATH` | `/tmp/traefik-dynamic.yml` | Path del YAML dinámico de Traefik |
+| `LISTEN_ADDR` | `:8080` | Dirección donde escucha el servidor HTTP |
+| `HEALTH_HOST` | `localhost` | Host para el healthcheck de deploys. Usar `host.docker.internal` en Docker Desktop (Windows/Mac) |
+| `PROXY_TARGET_HOST` | `localhost` | Host que Traefik usa para rutear tráfico a las apps. Usar `host.docker.internal` en Docker Desktop (Windows/Mac) |
 
 Secuencia de arranque: `NewPostgresStore` → `NewDockerClient` → `NewTraefikFileProxyManager`
 → `NewDockerfileBuilder` → `NewOrchestrator` → `NewServer` → `http.ListenAndServe`.

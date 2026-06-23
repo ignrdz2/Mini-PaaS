@@ -29,6 +29,8 @@ services:
       DATABASE_URL: postgres://minipaas:minipaas@postgres:5432/minipaas?sslmode=disable
       TRAEFIK_CONFIG_PATH: /etc/traefik/dynamic/dynamic.yml
       DOCKER_HOST: unix:///var/run/docker.sock
+      HEALTH_HOST: host.docker.internal
+      PROXY_TARGET_HOST: host.docker.internal
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock"
       - "./traefik/dynamic:/etc/traefik/dynamic"
