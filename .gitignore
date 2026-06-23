@@ -1,0 +1,12 @@
+docs/prompts/
+
+# binarios compilados
+bin/
+*.exe
+
+# Go
+vendor/
+
+# env local
+.env
+.env.local
