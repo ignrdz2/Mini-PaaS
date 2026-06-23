@@ -29,6 +29,12 @@ func main() {
 	}
 	defer s.Close()
 
+	// aplicar migraciones al arrancar (idempotente)
+	if err := s.RunMigrations(ctx); err != nil {
+		log.Fatalf("error al aplicar migraciones: %v", err)
+	}
+	log.Println("migraciones aplicadas correctamente")
+
 	// inicializar el cliente de Docker
 	dockerClient, err := docker.NewDockerClient()
 	if err != nil {

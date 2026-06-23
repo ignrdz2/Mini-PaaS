@@ -34,7 +34,7 @@ func TestMain(m *testing.M) {
 	moduleRoot := filepath.Join(filepath.Dir(thisFile), "..", "..")
 	cmd := exec.Command("go", "build", "-o", rutaBinario, "./cmd/deployctl")
 	cmd.Dir = moduleRoot
-	cmd.Env = append(os.Environ())
+	cmd.Env = os.Environ()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		panic("fallo al compilar deployctl: " + err.Error() + "\n" + string(out))
 	}

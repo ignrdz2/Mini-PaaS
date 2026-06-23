@@ -522,9 +522,96 @@ los tests. Cada test levanta su propio `httptest.Server` que simula una respuest
 
 ---
 
+---
+
+## Fase 8 — Integración end-to-end ✅
+
+**Planificado:** Dockerfile multi-stage para el orquestador, descomentar el servicio en
+`docker-compose.yml`, app de prueba para el test e2e, y test de integración automatizado
+con build tag `integration`.
+
+**Implementado:**
+
+### `internal/store/migrate.go` — migraciones al arranque
+
+`RunMigrations` ejecuta el DDL completo del schema v1 usando `IF NOT EXISTS` en cada
+objeto, lo que hace el arranque **idempotente**: se puede llamar en cada inicio del
+orquestador sin importar si las tablas ya existen. No se agregó `golang-migrate` como
+dependencia — el DDL es simple y estable para v1.
+
+`cmd/orchestrator/main.go` llama `s.RunMigrations(ctx)` justo después de conectar a
+Postgres, antes de inicializar cualquier otro componente.
+
+### `Dockerfile` — multi-stage
+
+```
+Stage build  → golang:1.25-alpine  — compila el binario con CGO_ENABLED=0
+Stage final  → golang:1.25-alpine  — apk add git + copia el binario
+```
+
+El stage final usa `golang:1.25-alpine` en lugar de `alpine` puro porque el orquestador
+necesita `git` en runtime para ejecutar `git clone` durante cada deploy.
+
+### `docker-compose.yml` — orchestrator activado
+
+- Servicio `orchestrator` descomentado con `build: .` (usa el Dockerfile de la raíz).
+- `postgres` recibe un `healthcheck` con `pg_isready`.
+- `orchestrator` tiene `depends_on: postgres: condition: service_healthy` — espera a que
+  Postgres esté listo antes de arrancar, evitando el race condition de conexión.
+
+Variables de entorno del orchestrator en compose:
+
+| Variable | Valor |
+|---|---|
+| `DATABASE_URL` | `postgres://minipaas:minipaas@postgres:5432/minipaas?sslmode=disable` |
+| `TRAEFIK_CONFIG_PATH` | `/etc/traefik/dynamic/dynamic.yml` |
+| `DOCKER_HOST` | `unix:///var/run/docker.sock` |
+
+### `testdata/sample-app/` — app mínima de prueba
+
+App Go que lee `PORT` del entorno y sirve `"ok"` en `/`. Tiene su propio `go.mod`
+(`github.com/ignrdz2/mini-paas-sample-app`) independiente del módulo principal, y un
+Dockerfile multi-stage que produce un binario estático en `alpine:3.20`.
+
+Para usarla en el test e2e se debe pushear a un repositorio público de GitHub y apuntar
+`E2E_TEST_REPO_URL` a esa URL.
+
+### `internal/integration/e2e_test.go` — test e2e automatizado
+
+Build tag `//go:build integration` — no corre con `go test ./...` regular.
+
+Configuración vía variables de entorno:
+
+| Variable | Default |
+|---|---|
+| `ORCHESTRATOR_URL` | `http://localhost:8080` |
+| `TRAEFIK_URL` | `http://localhost:80` |
+| `E2E_TEST_REPO_URL` | *(requerida, sin default — test se omite si no está definida)* |
+
+**Flujo de `TestE2EFlujoCompleto`:**
+
+1. Skip si `E2E_TEST_REPO_URL` no está definida.
+2. Polling a `/apps` hasta confirmar que el orquestador está disponible (timeout 15s).
+3. Crear app con nombre único (`e2e-<timestamp>`) para evitar colisiones entre runs.
+4. Deploy con timeout de 10 minutos; verificar que el status final es `running`.
+5. Polling a `http://localhost/<app-name>/` hasta obtener respuesta `< 500` (timeout 30s).
+6. DELETE de la app.
+7. Verificar que Traefik devuelve 404 para la ruta eliminada.
+8. `t.Cleanup` garantiza que la app se elimina aunque el test falle a mitad de camino.
+
+**Cómo correrlo:**
+```
+docker compose up --build -d
+E2E_TEST_REPO_URL=https://github.com/<usuario>/<repo> \
+  go test -tags=integration -timeout=5m ./internal/integration/...
+```
+
+**Resultado final:** `go build ./...` ✅ · `go vet ./...` ✅ · `go build -tags=integration ./internal/integration/...` ✅
+
+---
+
 ## Próximas fases
 
 | Fase | Descripción | Estado |
 |---|---|---|
-| Fase 8 | Integración end-to-end (docker compose up, test e2e) | Pendiente |
 | Fase 9 | Documentación pública (README, limpieza de docs/) | Pendiente |

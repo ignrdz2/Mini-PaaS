@@ -7,6 +7,11 @@ services:
       POSTGRES_PASSWORD: minipaas
     ports: ["5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minipaas -d minipaas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   traefik:
     image: traefik:v3.0
@@ -18,18 +23,21 @@ services:
     volumes:
       - "./traefik/dynamic:/etc/traefik/dynamic"
 
-  # orchestrator: descomentar cuando exista un Dockerfile real para el orquestador
-  # orchestrator:
-  #   build: .
-  #   environment:
-  #     DATABASE_URL: postgres://minipaas:minipaas@postgres:5432/minipaas
-  #     TRAEFIK_CONFIG_PATH: /etc/traefik/dynamic/dynamic.yml
-  #     DOCKER_HOST: unix:///var/run/docker.sock
-  #   volumes:
-  #     - "/var/run/docker.sock:/var/run/docker.sock"
-  #     - "./traefik/dynamic:/etc/traefik/dynamic"
-  #   ports: ["8080:8080"]
-  #   depends_on: ["postgres", "traefik"]
+  orchestrator:
+    build: .
+    environment:
+      DATABASE_URL: postgres://minipaas:minipaas@postgres:5432/minipaas?sslmode=disable
+      TRAEFIK_CONFIG_PATH: /etc/traefik/dynamic/dynamic.yml
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./traefik/dynamic:/etc/traefik/dynamic"
+    ports: ["8080:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      traefik:
+        condition: service_started
 
 volumes:
   pgdata:

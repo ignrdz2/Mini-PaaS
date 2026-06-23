@@ -1,0 +1,42 @@
+package store
+
+import (
+	"context"
+	"fmt"
+)
+
+// schemaMigration contiene el DDL completo del schema v1.
+// Usa IF NOT EXISTS en cada objeto para que sea idempotente — se puede ejecutar
+// en cada arranque sin importar si las tablas ya existen.
+const schemaMigration = `
+CREATE TABLE IF NOT EXISTS apps (
+    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        text NOT NULL UNIQUE,
+    repo_url    text NOT NULL,
+    health_path text NOT NULL DEFAULT '/',
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS deployments (
+    id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id          uuid NOT NULL REFERENCES apps(id),
+    image_tag       text NOT NULL,
+    status          text NOT NULL DEFAULT 'pending',
+    container_id    text,
+    internal_port   integer,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    finished_at     timestamptz,
+    error_message   text
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(app_id);
+`
+
+// RunMigrations aplica el schema de v1 contra la base de datos.
+// Es idempotente: se puede llamar en cada arranque sin efectos secundarios.
+func (s *PostgresStore) RunMigrations(ctx context.Context) error {
+	if _, err := s.pool.Exec(ctx, schemaMigration); err != nil {
+		return fmt.Errorf("error al aplicar migraciones: %w", err)
+	}
+	return nil
+}
