@@ -232,12 +232,71 @@ func WaitHealthy(ctx context.Context, port int, healthPath string, timeout time.
 
 ---
 
+---
+
+## Fase 4 — ProxyManager ✅
+
+**Planificado:** interfaz `ProxyManager`, `TraefikFileProxyManager` con serialización YAML
+y escritura atómica, tests sin necesitar Traefik corriendo.
+
+**Implementado:**
+
+### Dependencia agregada
+- `gopkg.in/yaml.v3` para serialización del YAML de Traefik.
+
+### `internal/proxy/proxy.go` — interfaz estable
+```go
+type ProxyManager interface {
+    Sync(ctx context.Context, routes []Route) error
+}
+type Route struct {
+    AppName    string
+    TargetPort int
+}
+```
+Firma idéntica a la definida en ARCHITECTURE.md.
+
+### `internal/proxy/traefik_file.go` — `TraefikFileProxyManager`
+
+Constructor `NewTraefikFileProxyManager(configPath string)` recibe el path completo al
+archivo YAML dinámico (valor de `TRAEFIK_CONFIG_PATH`).
+
+**`Sync(ctx, routes)`:**
+- Routes vacías → escribe YAML vacío válido (`{}` serializado).
+- Por cada route genera las tres entradas requeridas por Traefik file provider:
+  - Router: `rule: "PathPrefix(\`/<appName>\`)"`, service, middlewares
+  - Middleware: `stripPrefix` con `prefixes: ["/<appName>"]`
+  - Service: `loadBalancer.servers[0].url = "http://localhost:<targetPort>"`
+- Serializa el config completo de una vez (no incremental) con `yaml.Marshal`.
+- Escritura atómica en `escribirAtomico`: `os.CreateTemp` en el mismo directorio → write
+  → close → `os.Rename`. Si falla en cualquier punto limpia el temporal.
+
+### Tests (`internal/proxy/proxy_test.go`) — 6 tests, sin Traefik real
+
+| Test | Qué verifica |
+|---|---|
+| TestSync_RoutesVacias | archivo creado, YAML parseble sin error |
+| TestSync_UnaRoute | router, middleware, service y puerto correctos (string matching) |
+| TestSync_UnaRoute_EstructuraCompleta | estructura YAML validada via `yaml.Unmarshal` a map |
+| TestSync_VariasRoutes | todas las apps y puertos presentes en el mismo YAML |
+| TestSync_DirectorioInexistente | error cuando el directorio padre no existe |
+| TestSync_SobreescribeContenidoPrevio | segunda Sync elimina apps que ya no están en routes |
+
+Todos los tests usan `t.TempDir()` como directorio base del configPath.
+
+**Resultado final:** 6/6 PASS, `go build ./...` limpio.
+
+### Ajustes respecto al plan
+- Ninguno. La implementación sigue el plan exactamente.
+
+---
+
 ## Próximas fases
 
 | Fase | Descripción | Estado |
 |---|---|---|
 | Fase 3 | Runtime + Healthcheck (DockerClient wrapper, WaitHealthy) | ✅ |
-| Fase 4 | ProxyManager (TraefikFileProxyManager, YAML atómico) | Pendiente |
+| Fase 4 | ProxyManager (TraefikFileProxyManager, YAML atómico) | ✅ |
 
 | Fase 5 | Orquestación (coordina Builder → runtime → healthcheck → proxy) | Pendiente |
 | Fase 6 | API REST (7 endpoints, chi router, main.go) | Pendiente |
