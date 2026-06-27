@@ -5,9 +5,10 @@ import (
 	"fmt"
 )
 
-// schemaMigration contiene el DDL completo del schema v1.
-// Usa IF NOT EXISTS en cada objeto para que sea idempotente — se puede ejecutar
-// en cada arranque sin importar si las tablas ya existen.
+// schemaMigration contiene el DDL completo del schema (v1 + v2).
+// Usa IF NOT EXISTS / ADD COLUMN IF NOT EXISTS en cada objeto para que sea
+// idempotente — se puede ejecutar en cada arranque sin importar si las tablas
+// ya existen o si la columna fue agregada en una ejecución anterior.
 const schemaMigration = `
 CREATE TABLE IF NOT EXISTS apps (
     id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -30,9 +31,24 @@ CREATE TABLE IF NOT EXISTS deployments (
 );
 
 CREATE INDEX IF NOT EXISTS idx_deployments_app_id ON deployments(app_id);
+
+-- v2: referencia al deployment origen de un rollback (NULL en deploys normales).
+ALTER TABLE deployments
+    ADD COLUMN IF NOT EXISTS rolled_back_from uuid REFERENCES deployments(id);
+
+-- v2: logs de build línea a línea para SSE y acceso histórico.
+CREATE TABLE IF NOT EXISTS deployment_logs (
+    id              bigserial PRIMARY KEY,
+    deployment_id   uuid NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+    created_at      timestamptz NOT NULL DEFAULT now(),
+    message         text NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployment_logs_deployment_id
+    ON deployment_logs(deployment_id);
 `
 
-// RunMigrations aplica el schema de v1 contra la base de datos.
+// RunMigrations aplica el schema completo contra la base de datos.
 // Es idempotente: se puede llamar en cada arranque sin efectos secundarios.
 func (s *PostgresStore) RunMigrations(ctx context.Context) error {
 	if _, err := s.pool.Exec(ctx, schemaMigration); err != nil {

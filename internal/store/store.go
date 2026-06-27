@@ -18,6 +18,11 @@ type Store interface {
 	ListDeployments(ctx context.Context, appID pgtype.UUID) ([]Deployment, error)
 	GetActiveDeployment(ctx context.Context, appID pgtype.UUID) (Deployment, error)
 	UpdateDeploymentStatus(ctx context.Context, params UpdateDeploymentParams) (Deployment, error)
+
+	// Operaciones de logs de build.
+	CreateDeploymentLog(ctx context.Context, deploymentID pgtype.UUID, message string) error
+	ListDeploymentLogs(ctx context.Context, deploymentID pgtype.UUID) ([]DeploymentLog, error)
+	ListDeploymentLogsAfter(ctx context.Context, deploymentID pgtype.UUID, afterID int64) ([]DeploymentLog, error)
 }
 
 // UpdateDeploymentParams envuelve el ID del deployment y los campos modificables.

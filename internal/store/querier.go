@@ -13,11 +13,14 @@ import (
 type Querier interface {
 	CreateApp(ctx context.Context, arg CreateAppParams) (App, error)
 	CreateDeployment(ctx context.Context, arg CreateDeploymentParams) (Deployment, error)
+	CreateDeploymentLog(ctx context.Context, arg CreateDeploymentLogParams) (DeploymentLog, error)
 	DeleteApp(ctx context.Context, name string) error
 	GetActiveDeploymentByApp(ctx context.Context, appID pgtype.UUID) (Deployment, error)
 	GetAppByName(ctx context.Context, name string) (App, error)
 	GetDeployment(ctx context.Context, id pgtype.UUID) (Deployment, error)
 	ListApps(ctx context.Context) ([]App, error)
+	ListDeploymentLogs(ctx context.Context, deploymentID pgtype.UUID) ([]DeploymentLog, error)
+	ListDeploymentLogsAfter(ctx context.Context, arg ListDeploymentLogsAfterParams) ([]DeploymentLog, error)
 	ListDeploymentsByApp(ctx context.Context, appID pgtype.UUID) ([]Deployment, error)
 	UpdateDeploymentStatus(ctx context.Context, arg UpdateDeploymentStatusParams) (Deployment, error)
 }

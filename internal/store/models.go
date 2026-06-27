@@ -17,13 +17,21 @@ type App struct {
 }
 
 type Deployment struct {
-	ID           pgtype.UUID
-	AppID        pgtype.UUID
-	ImageTag     string
-	Status       string
-	ContainerID  pgtype.Text
-	InternalPort pgtype.Int4
+	ID             pgtype.UUID
+	AppID          pgtype.UUID
+	ImageTag       string
+	Status         string
+	ContainerID    pgtype.Text
+	InternalPort   pgtype.Int4
+	CreatedAt      pgtype.Timestamptz
+	FinishedAt     pgtype.Timestamptz
+	ErrorMessage   pgtype.Text
+	RolledBackFrom pgtype.UUID
+}
+
+type DeploymentLog struct {
+	ID           int64
+	DeploymentID pgtype.UUID
 	CreatedAt    pgtype.Timestamptz
-	FinishedAt   pgtype.Timestamptz
-	ErrorMessage pgtype.Text
+	Message      string
 }

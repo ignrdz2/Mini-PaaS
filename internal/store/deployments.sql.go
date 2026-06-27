@@ -14,7 +14,7 @@ import (
 const createDeployment = `-- name: CreateDeployment :one
 INSERT INTO deployments (app_id, image_tag)
 VALUES ($1, $2)
-RETURNING id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message
+RETURNING id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message, rolled_back_from
 `
 
 type CreateDeploymentParams struct {
@@ -35,12 +35,13 @@ func (q *Queries) CreateDeployment(ctx context.Context, arg CreateDeploymentPara
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.ErrorMessage,
+		&i.RolledBackFrom,
 	)
 	return i, err
 }
 
 const getActiveDeploymentByApp = `-- name: GetActiveDeploymentByApp :one
-SELECT id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message FROM deployments
+SELECT id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message, rolled_back_from FROM deployments
 WHERE app_id = $1
   AND status = 'running'
 ORDER BY created_at DESC
@@ -60,12 +61,13 @@ func (q *Queries) GetActiveDeploymentByApp(ctx context.Context, appID pgtype.UUI
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.ErrorMessage,
+		&i.RolledBackFrom,
 	)
 	return i, err
 }
 
 const getDeployment = `-- name: GetDeployment :one
-SELECT id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message FROM deployments
+SELECT id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message, rolled_back_from FROM deployments
 WHERE id = $1
 `
 
@@ -82,12 +84,13 @@ func (q *Queries) GetDeployment(ctx context.Context, id pgtype.UUID) (Deployment
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.ErrorMessage,
+		&i.RolledBackFrom,
 	)
 	return i, err
 }
 
 const listDeploymentsByApp = `-- name: ListDeploymentsByApp :many
-SELECT id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message FROM deployments
+SELECT id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message, rolled_back_from FROM deployments
 WHERE app_id = $1
 ORDER BY created_at DESC
 `
@@ -111,6 +114,7 @@ func (q *Queries) ListDeploymentsByApp(ctx context.Context, appID pgtype.UUID) (
 			&i.CreatedAt,
 			&i.FinishedAt,
 			&i.ErrorMessage,
+			&i.RolledBackFrom,
 		); err != nil {
 			return nil, err
 		}
@@ -131,7 +135,7 @@ SET
     finished_at   = COALESCE($5, finished_at),
     error_message = COALESCE($6, error_message)
 WHERE id = $1
-RETURNING id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message
+RETURNING id, app_id, image_tag, status, container_id, internal_port, created_at, finished_at, error_message, rolled_back_from
 `
 
 type UpdateDeploymentStatusParams struct {
@@ -163,6 +167,7 @@ func (q *Queries) UpdateDeploymentStatus(ctx context.Context, arg UpdateDeployme
 		&i.CreatedAt,
 		&i.FinishedAt,
 		&i.ErrorMessage,
+		&i.RolledBackFrom,
 	)
 	return i, err
 }

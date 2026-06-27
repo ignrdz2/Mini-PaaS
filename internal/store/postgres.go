@@ -73,3 +73,22 @@ func (s *PostgresStore) GetActiveDeployment(ctx context.Context, appID pgtype.UU
 func (s *PostgresStore) UpdateDeploymentStatus(ctx context.Context, params UpdateDeploymentParams) (Deployment, error) {
 	return s.Queries.UpdateDeploymentStatus(ctx, UpdateDeploymentStatusParams(params))
 }
+
+func (s *PostgresStore) CreateDeploymentLog(ctx context.Context, deploymentID pgtype.UUID, message string) error {
+	_, err := s.Queries.CreateDeploymentLog(ctx, CreateDeploymentLogParams{
+		DeploymentID: deploymentID,
+		Message:      message,
+	})
+	return err
+}
+
+func (s *PostgresStore) ListDeploymentLogs(ctx context.Context, deploymentID pgtype.UUID) ([]DeploymentLog, error) {
+	return s.Queries.ListDeploymentLogs(ctx, deploymentID)
+}
+
+func (s *PostgresStore) ListDeploymentLogsAfter(ctx context.Context, deploymentID pgtype.UUID, afterID int64) ([]DeploymentLog, error) {
+	return s.Queries.ListDeploymentLogsAfter(ctx, ListDeploymentLogsAfterParams{
+		DeploymentID: deploymentID,
+		AfterID:      afterID,
+	})
+}
